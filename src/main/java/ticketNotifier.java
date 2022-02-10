@@ -1,5 +1,8 @@
 import net.dv8tion.jda.api.JDABuilder;
 import net.dv8tion.jda.api.entities.*;
+import net.dv8tion.jda.api.events.GenericEvent;
+import net.dv8tion.jda.api.events.ReadyEvent;
+import net.dv8tion.jda.api.events.guild.GuildAvailableEvent;
 import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEvent;
 import net.dv8tion.jda.api.events.message.MessageReceivedEvent;
 import net.dv8tion.jda.api.hooks.ListenerAdapter;
@@ -10,15 +13,17 @@ import org.apache.commons.io.IOUtils;
 
 import javax.security.auth.login.LoginException;
 import java.io.*;
+import java.util.List;
 import java.util.Scanner;
 
 
-public class ticketNotifier extends ListenerAdapter {
+public class ticketNotifier extends ListenerAdapter implements Runnable{
 
     private static MessageChannel pingChannel = null;
     private static Role role1 = null;
     private static Role role2 = null;
     private static String token;
+    private static ReadyEvent readyEvent = null;
 
     public static void main(String[] args) throws LoginException, IOException {
 
@@ -31,32 +36,30 @@ public class ticketNotifier extends ListenerAdapter {
         bot.setActivity(Activity.watching("Searching for new threads..."));
         bot.addEventListeners(new ticketNotifier());
 
-        File settingsFile = new File("src/main/resources/openThreads");
-        if (settingsFile.createNewFile()) {
-            System.out.println("Settings file didn't exist, created new one");
-        }
-        else {
-            System.out.println("Settings file exists");
-        }
-        if (settingsFile.length() != 0) {
-            Scanner reader = new Scanner(settingsFile);
-            String[] setting = reader.nextLine().split("-");
-            if (setting.length == 3) {
-                pingChannel = bot.build().getTextChannelById(setting[0]);
-                role1 = bot.build().getRoleById(setting[1]);
-                role2 = bot.build().getRoleById(setting[2]);
-            }
-        }
-
         //Add commands to the bot
         CommandListUpdateAction commands = bot.build().updateCommands()
-                .addCommands(Commands.slash("setup", "Setting up the Bot...")
+                .addCommands(Commands.slash("setup", "Setting up the channel where you want to get pinged and the roles to get pinged.")
                         .addOption(OptionType.CHANNEL, "channel", "Add Channel where the Bot will ping the staff when a new Thread was created", true)
                         .addOption(OptionType.ROLE, "role-1", "Add a Role that is going to be pinged.", true)
                         .addOption(OptionType.ROLE, "role-2", "Add another Role that is going to be pinged.", false));
         commands.queue();
+
     }
 
+
+    @Override
+    public void onReady (ReadyEvent event) {
+        try {
+            setupLoadSettings(event);
+        } catch (IOException e) {
+            e.printStackTrace();
+        } catch (LoginException e) {
+            e.printStackTrace();
+        }
+        readyEvent = event;
+        ticketNotifier thread = new ticketNotifier();
+        thread.run();
+    }
     /**
      * Logic of the Slash Command.
      * Will be automatically called when a Slash-Command is executed.
@@ -69,7 +72,9 @@ public class ticketNotifier extends ListenerAdapter {
             event.deferReply().queue();
             pingChannel = event.getOption("channel").getAsTextChannel();
             role1 = event.getOption("role-1").getAsRole();
-            role2 = event.getOption("role-2").getAsRole();
+            if (event.getOption("role-2") != null){
+                role2 = event.getOption("role-2").getAsRole();
+            }
             event.getHook().sendMessage("Finished setting up.").queue();
             if (role2 != null) {
                 event.getHook().sendMessage(role1.getName() + " and " + role2.getName() + " will be now pinged in #" + pingChannel.getName()).queue();
@@ -77,6 +82,7 @@ public class ticketNotifier extends ListenerAdapter {
                 event.getHook().sendMessage(role1.getName() + " will be now pinged in #" + pingChannel.getName()).queue();
             }
             try {
+                System.out.println("Applying Settings to the File");
                 addSettingsToFile();
             } catch (IOException e) {
                 e.printStackTrace();
@@ -98,14 +104,7 @@ public class ticketNotifier extends ListenerAdapter {
                 if (event.isFromThread()) {
                     File openThreads = new File("src/main/resources/openThreads");
                     if (openThreads.length() == 0) {
-                        try {
-                            FileWriter writer = new FileWriter("src/main/resources/openThreads", true);
-                            writer.write(Long.toString(event.getThreadChannel().getIdLong()) + "\n");
-                            pingChannel.sendMessage("New thread detected " + role1.getAsMention() + role2.getAsMention()).queue();
-                            writer.close();
-                        } catch (IOException e) {
-                            e.printStackTrace();
-                        }
+                        sendPing(event);
                     } else {
                         try {
                             Scanner reader = new Scanner(openThreads);
@@ -113,19 +112,13 @@ public class ticketNotifier extends ListenerAdapter {
                                 long threadID = Long.parseLong(reader.nextLine());
                                 if (threadID == event.getThreadChannel().getIdLong()) {
                                     threadExists = true;
+                                    reader.close();
                                     break;
                                 }
                             }
                             reader.close();
                             if (!threadExists) {
-                                try {
-                                    FileWriter writer = new FileWriter("src/main/resources/openThreads", true);
-                                    writer.write(Long.toString(event.getThreadChannel().getIdLong()) + "\n");
-                                    pingChannel.sendMessage("New thread detected " + role1.getAsMention() + role2.getAsMention()).queue();
-                                    writer.close();
-                                } catch (IOException e) {
-                                    e.printStackTrace();
-                                }
+                                sendPing(event);
                             }
                         } catch (FileNotFoundException e) {
                             e.printStackTrace();
@@ -139,18 +132,112 @@ public class ticketNotifier extends ListenerAdapter {
     }
 
     private void addSettingsToFile() throws IOException {
-        if (role2 != null) {
+        System.out.println("Writing into settings file...");
+        if (role2 == null) {
             try {
-                FileWriter writer = new FileWriter("src/main/resources/openThreads");
+                System.out.println(pingChannel.getId() + "-" + role1.getId());
+                FileWriter writer = new FileWriter("src/main/resources/settings");
                 writer.write(pingChannel.getId() + "-" + role1.getId());
+                writer.close();
             } catch (IOException e) {
                 e.printStackTrace();
             }
         } else {
             try {
-                FileWriter writer = new FileWriter("src/main/resources/openThreads");
+                System.out.println(pingChannel.getId() + "-" + role1.getId() + "-" + role2.getId());
+                FileWriter writer = new FileWriter("src/main/resources/settings");
                 writer.write(pingChannel.getId() + "-" + role1.getId() + "-" + role2.getId());
+                writer.close();
             } catch (IOException e) {
+                e.printStackTrace();
+            }
+        }
+    }
+
+
+    private static void setupLoadSettings(ReadyEvent event) throws IOException, LoginException {
+        File settingsFile = new File("src/main/resources/settings");
+        if (settingsFile.createNewFile()) {
+            System.out.println("Settings file didn't exist, created new one");
+        }
+        else {
+            System.out.println("Settings file exists");
+        }
+        if (settingsFile.length() != 0) {
+            System.out.println("Settings file is not 0");
+            Scanner reader = new Scanner(settingsFile);
+            String[] setting = reader.nextLine().split("-");
+            if (setting.length == 3) {
+                pingChannel = event.getJDA().getTextChannelById(setting[0]);
+                role1 = event.getJDA().getRoleById(setting[1]);
+                role2 = event.getJDA().getRoleById(setting[2]);
+                System.out.println("Applied the Ping Channel and 2 Roles");
+            } else {
+                pingChannel = event.getJDA().getTextChannelById(setting[0]);
+                role1 = event.getJDA().getRoleById(setting[1]);
+                System.out.println("Applied the Ping Channel and the role");
+            }
+            reader.close();
+        }
+    }
+
+    private void sendPing(MessageReceivedEvent event) {
+        try {
+            FileWriter writer = new FileWriter("src/main/resources/openThreads", true);
+            writer.write(Long.toString(event.getThreadChannel().getIdLong()) + "\n");
+            if (role2 != null) {
+                pingChannel.sendMessage("New thread detected " + role1.getAsMention() + role2.getAsMention()).queue();
+            } else {
+                pingChannel.sendMessage("New thread detected " + role1.getAsMention()).queue();
+            }
+            writer.close();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
+    private void checkThread () throws IOException {
+        System.out.println("Checking opened Threads...");
+        boolean threadExists = false;
+        File openThreads = new File("src/main/resources/openThreads");
+        Scanner reader = new Scanner(openThreads);
+        List<ThreadChannel> guildThreadList = readyEvent.getJDA().getThreadChannels();
+        File tmpFile = new File("src/main/resources/openThreadsTMP");
+        tmpFile.createNewFile();
+        FileWriter writer = new FileWriter("src/main/resources/openThreadsTMP");
+        System.out.println("Size of List: " + guildThreadList.size());
+        for (int i = 0; i < guildThreadList.size(); i++) {
+            while (reader.hasNextLine()) {
+                String fileID = reader.nextLine();
+                //System.out.println("Thread ID from Thread List: " + guildThreadList.get(i).getId() + "; Thread ID from File: " + fileID);
+                if (guildThreadList.get(i).getId().equals(fileID)) {
+                    threadExists = true;
+                    break;
+                }
+            }
+            if (threadExists) {
+                System.out.println("Writing existing Thread into TMP file");
+                writer.write(String.valueOf(guildThreadList.get(i).getId()) + "\n");
+            }
+            reader.reset();
+        }
+        writer.close();
+        reader.close();
+        openThreads.delete();
+        System.out.println("Deleted old file");
+        tmpFile.renameTo(openThreads);
+        System.out.println("Renamed new file");
+    }
+
+    @Override
+    public void run() {
+        while (true){
+            try {
+                checkThread();
+                Thread.sleep(60000);
+            } catch (FileNotFoundException e) {
+                e.printStackTrace();
+            } catch (InterruptedException | IOException e) {
                 e.printStackTrace();
             }
         }
