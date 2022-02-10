@@ -1,8 +1,6 @@
 import net.dv8tion.jda.api.JDABuilder;
 import net.dv8tion.jda.api.entities.*;
-import net.dv8tion.jda.api.events.GenericEvent;
 import net.dv8tion.jda.api.events.ReadyEvent;
-import net.dv8tion.jda.api.events.guild.GuildAvailableEvent;
 import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEvent;
 import net.dv8tion.jda.api.events.message.MessageReceivedEvent;
 import net.dv8tion.jda.api.hooks.ListenerAdapter;
@@ -13,21 +11,21 @@ import org.apache.commons.io.IOUtils;
 
 import javax.security.auth.login.LoginException;
 import java.io.*;
-import java.util.List;
 import java.util.Scanner;
 
 
-public class ticketNotifier extends ListenerAdapter implements Runnable{
+public class ticketNotifier extends ListenerAdapter{
 
     private static MessageChannel pingChannel = null;
     private static Role role1 = null;
     private static Role role2 = null;
     private static String token;
     private static ReadyEvent readyEvent = null;
+    static threadChecker threadChecker;
 
     public static void main(String[] args) throws LoginException, IOException {
 
-        try (FileInputStream inputStream = new FileInputStream("src/main/resources/token.txt")) {
+        try (FileInputStream inputStream = new FileInputStream("src/main/resources/token")) {
             String input = IOUtils.toString(inputStream);
             token = input;
         }
@@ -49,6 +47,7 @@ public class ticketNotifier extends ListenerAdapter implements Runnable{
 
     @Override
     public void onReady (ReadyEvent event) {
+        System.out.println("Bot is ready");
         try {
             setupLoadSettings(event);
         } catch (IOException e) {
@@ -57,8 +56,11 @@ public class ticketNotifier extends ListenerAdapter implements Runnable{
             e.printStackTrace();
         }
         readyEvent = event;
-        ticketNotifier thread = new ticketNotifier();
-        thread.run();
+        //threadChecker = new threadChecker(readyEvent, null);
+        Thread thread = new Thread(threadChecker = new threadChecker(readyEvent, null));
+        thread.start();
+        //ticketNotifier thread = new ticketNotifier();
+        //thread.run();
     }
     /**
      * Logic of the Slash Command.
@@ -71,6 +73,7 @@ public class ticketNotifier extends ListenerAdapter implements Runnable{
         if (event.getName().equals("setup")) {
             event.deferReply().queue();
             pingChannel = event.getOption("channel").getAsTextChannel();
+            threadChecker.setPingChannel(pingChannel);
             role1 = event.getOption("role-1").getAsRole();
             if (event.getOption("role-2") != null){
                 role2 = event.getOption("role-2").getAsRole();
@@ -103,26 +106,33 @@ public class ticketNotifier extends ListenerAdapter implements Runnable{
             if (pingChannel != null) {
                 if (event.isFromThread()) {
                     File openThreads = new File("src/main/resources/openThreads");
-                    if (openThreads.length() == 0) {
-                        sendPing(event);
-                    } else {
-                        try {
-                            Scanner reader = new Scanner(openThreads);
-                            while (reader.hasNextLine()) {
-                                long threadID = Long.parseLong(reader.nextLine());
-                                if (threadID == event.getThreadChannel().getIdLong()) {
-                                    threadExists = true;
-                                    reader.close();
-                                    break;
-                                }
-                            }
-                            reader.close();
-                            if (!threadExists) {
-                                sendPing(event);
-                            }
-                        } catch (FileNotFoundException e) {
-                            e.printStackTrace();
+                    try {
+                        if(openThreads.createNewFile()) {
+                            System.out.println("Created openThreads File");
                         }
+                        if (openThreads.length() == 0) {
+                            sendPing(event);
+                        } else {
+                            try {
+                                Scanner reader = new Scanner(openThreads);
+                                while (reader.hasNextLine()) {
+                                    long threadID = Long.parseLong(reader.nextLine());
+                                    if (threadID == event.getThreadChannel().getIdLong()) {
+                                        threadExists = true;
+                                        reader.close();
+                                        break;
+                                    }
+                                }
+                                reader.close();
+                                if (!threadExists) {
+                                    sendPing(event);
+                                }
+                            } catch (FileNotFoundException e) {
+                                e.printStackTrace();
+                            }
+                        }
+                    } catch (IOException e) {
+                        e.printStackTrace();
                     }
                 }
             } else {
@@ -169,6 +179,7 @@ public class ticketNotifier extends ListenerAdapter implements Runnable{
             String[] setting = reader.nextLine().split("-");
             if (setting.length == 3) {
                 pingChannel = event.getJDA().getTextChannelById(setting[0]);
+                threadChecker.setPingChannel(pingChannel);
                 role1 = event.getJDA().getRoleById(setting[1]);
                 role2 = event.getJDA().getRoleById(setting[2]);
                 System.out.println("Applied the Ping Channel and 2 Roles");
@@ -185,61 +196,15 @@ public class ticketNotifier extends ListenerAdapter implements Runnable{
         try {
             FileWriter writer = new FileWriter("src/main/resources/openThreads", true);
             writer.write(Long.toString(event.getThreadChannel().getIdLong()) + "\n");
+            System.out.println("New Thread ID written into openThreads File");
             if (role2 != null) {
-                pingChannel.sendMessage("New thread detected " + role1.getAsMention() + role2.getAsMention()).queue();
+                pingChannel.sendMessage("New thread " + "<#" + event.getThreadChannel().getIdLong() + ">" + " detected " + role1.getAsMention() + role2.getAsMention()).queue();
             } else {
-                pingChannel.sendMessage("New thread detected " + role1.getAsMention()).queue();
+                pingChannel.sendMessage("New thread " + "<#" + event.getThreadChannel().getIdLong() + ">" + " detected " + role1.getAsMention()).queue();
             }
             writer.close();
         } catch (IOException e) {
             e.printStackTrace();
-        }
-    }
-
-    private void checkThread () throws IOException {
-        System.out.println("Checking opened Threads...");
-        boolean threadExists = false;
-        File openThreads = new File("src/main/resources/openThreads");
-        Scanner reader = new Scanner(openThreads);
-        List<ThreadChannel> guildThreadList = readyEvent.getJDA().getThreadChannels();
-        File tmpFile = new File("src/main/resources/openThreadsTMP");
-        tmpFile.createNewFile();
-        FileWriter writer = new FileWriter("src/main/resources/openThreadsTMP");
-        System.out.println("Size of List: " + guildThreadList.size());
-        for (int i = 0; i < guildThreadList.size(); i++) {
-            while (reader.hasNextLine()) {
-                String fileID = reader.nextLine();
-                //System.out.println("Thread ID from Thread List: " + guildThreadList.get(i).getId() + "; Thread ID from File: " + fileID);
-                if (guildThreadList.get(i).getId().equals(fileID)) {
-                    threadExists = true;
-                    break;
-                }
-            }
-            if (threadExists) {
-                System.out.println("Writing existing Thread into TMP file");
-                writer.write(String.valueOf(guildThreadList.get(i).getId()) + "\n");
-            }
-            reader.reset();
-        }
-        writer.close();
-        reader.close();
-        openThreads.delete();
-        System.out.println("Deleted old file");
-        tmpFile.renameTo(openThreads);
-        System.out.println("Renamed new file");
-    }
-
-    @Override
-    public void run() {
-        while (true){
-            try {
-                checkThread();
-                Thread.sleep(60000);
-            } catch (FileNotFoundException e) {
-                e.printStackTrace();
-            } catch (InterruptedException | IOException e) {
-                e.printStackTrace();
-            }
         }
     }
 }

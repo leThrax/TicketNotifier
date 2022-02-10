@@ -7,5 +7,6 @@
 /dataSources/
 /dataSources.local.xml
 
-/src/main/resources/Token.java
+/src/main/resources/token
 /src/main/resources/settings
+/src/main/resources/openThreads
