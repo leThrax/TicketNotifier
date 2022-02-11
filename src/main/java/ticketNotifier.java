@@ -1,4 +1,5 @@
 import net.dv8tion.jda.api.JDABuilder;
+import net.dv8tion.jda.api.Permission;
 import net.dv8tion.jda.api.entities.*;
 import net.dv8tion.jda.api.events.ReadyEvent;
 import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEvent;
@@ -11,6 +12,7 @@ import org.apache.commons.io.IOUtils;
 
 import javax.security.auth.login.LoginException;
 import java.io.*;
+import java.util.List;
 import java.util.Scanner;
 
 
@@ -34,7 +36,7 @@ public class ticketNotifier extends ListenerAdapter{
         bot.setActivity(Activity.watching("Searching for new threads..."));
         bot.addEventListeners(new ticketNotifier());
 
-        //Add commands to the bot
+       //Add commands to the bot
         CommandListUpdateAction commands = bot.build().updateCommands()
                 .addCommands(Commands.slash("setup", "Setting up the channel where you want to get pinged and the roles to get pinged.")
                         .addOption(OptionType.CHANNEL, "channel", "Add Channel where the Bot will ping the staff when a new Thread was created", true)
@@ -72,23 +74,30 @@ public class ticketNotifier extends ListenerAdapter{
     public void onSlashCommandInteraction(SlashCommandInteractionEvent event) {
         if (event.getName().equals("setup")) {
             event.deferReply().queue();
-            pingChannel = event.getOption("channel").getAsTextChannel();
-            threadChecker.setPingChannel(pingChannel);
-            role1 = event.getOption("role-1").getAsRole();
-            if (event.getOption("role-2") != null){
-                role2 = event.getOption("role-2").getAsRole();
+            if (isAdmin(event)) {
+                pingChannel = event.getOption("channel").getAsTextChannel();
+                threadChecker.setPingChannel(pingChannel);
+                role1 = event.getOption("role-1").getAsRole();
+                if (event.getOption("role-2") != null) {
+                    role2 = event.getOption("role-2").getAsRole();
+                }
+                event.getHook().sendMessage("Finished setting up.").queue();
+                if (role2 != null) {
+                    event.getHook().sendMessage(role1.getName() + " and " + role2.getName()
+                            + " will be now pinged in <#" + pingChannel.getId() + ">").queue();
+                } else {
+                    event.getHook().sendMessage(role1.getName()
+                            + " will be now pinged in <#" + pingChannel.getId() + ">").queue();
+                }
+                try {
+                    System.out.println("Applying Settings to the File");
+                    addSettingsToFile();
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
             }
-            event.getHook().sendMessage("Finished setting up.").queue();
-            if (role2 != null) {
-                event.getHook().sendMessage(role1.getName() + " and " + role2.getName() + " will be now pinged in #" + pingChannel.getName()).queue();
-            } else {
-                event.getHook().sendMessage(role1.getName() + " will be now pinged in #" + pingChannel.getName()).queue();
-            }
-            try {
-                System.out.println("Applying Settings to the File");
-                addSettingsToFile();
-            } catch (IOException e) {
-                e.printStackTrace();
+            else {
+                event.getHook().sendMessage("Error. You need admin rights to use this command").queue();
             }
         }
     }
@@ -206,6 +215,18 @@ public class ticketNotifier extends ListenerAdapter{
         } catch (IOException e) {
             e.printStackTrace();
         }
+    }
+
+    private boolean isAdmin(SlashCommandInteractionEvent event) {
+        List<Role> userRolesList = event.getInteraction().getMember().getRoles();
+        for (int i = 0; i < userRolesList.size(); i++) {
+            if (userRolesList.get(i).getPermissions().contains(Permission.ADMINISTRATOR)) {
+                System.out.println("Slash Command User role has admin rights");
+                return true;
+            }
+        }
+
+        return false;
     }
 }
 

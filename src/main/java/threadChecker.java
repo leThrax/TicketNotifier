@@ -39,6 +39,9 @@ public class threadChecker implements Runnable {
         System.out.println("Checking opened Threads...");
         boolean threadExists = false;
         File openThreads = new File("src/main/resources/openThreads");
+        if (openThreads.createNewFile()) {
+            System.out.println("Creating new openThreads file");
+        }
         Scanner reader = new Scanner(openThreads);
         List<ThreadChannel> guildThreadList = readyEvent.getJDA().getThreadChannels();
         File tmpFile = new File("src/main/resources/openThreadsTMP");
