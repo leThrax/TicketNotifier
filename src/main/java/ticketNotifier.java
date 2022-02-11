@@ -25,11 +25,15 @@ public class ticketNotifier extends ListenerAdapter{
     private static ReadyEvent readyEvent = null;
     static threadChecker threadChecker;
 
-    public static void main(String[] args) throws LoginException, IOException {
-
-        try (FileInputStream inputStream = new FileInputStream("resources/token")) {
-            String input = IOUtils.toString(inputStream);
-            token = input;
+    //public static void main(String[] args) throws LoginException, IOException {
+    public static void start() throws LoginException, IOException {
+        try {
+            File tokenFile = new File("resources/token.txt");
+            Scanner reader = new Scanner(tokenFile);
+            token = reader.nextLine();
+            reader.close();
+        } catch (FileNotFoundException e) {
+            e.printStackTrace();
         }
 
         JDABuilder bot = JDABuilder.createDefault(token);
@@ -114,10 +118,10 @@ public class ticketNotifier extends ListenerAdapter{
         if (event.getMessage().getAuthor().getIdLong() != event.getJDA().getSelfUser().getIdLong()) {
             if (pingChannel != null) {
                 if (event.isFromThread()) {
-                    File openThreads = new File("resources/openThreads");
+                    File openThreads = new File("resources/openThreads.txt");
                     try {
                         if(openThreads.createNewFile()) {
-                            System.out.println("Created openThreads File");
+                            System.out.println("Created openThreads.txt File");
                         }
                         if (openThreads.length() == 0) {
                             sendPing(event);
@@ -151,11 +155,11 @@ public class ticketNotifier extends ListenerAdapter{
     }
 
     private void addSettingsToFile() throws IOException {
-        System.out.println("Writing into settings file...");
+        System.out.println("Writing into settings.txt file...");
         if (role2 == null) {
             try {
                 System.out.println(pingChannel.getId() + "-" + role1.getId());
-                FileWriter writer = new FileWriter("resources/settings");
+                FileWriter writer = new FileWriter("resources/settings.txt");
                 writer.write(pingChannel.getId() + "-" + role1.getId());
                 writer.close();
             } catch (IOException e) {
@@ -164,7 +168,7 @@ public class ticketNotifier extends ListenerAdapter{
         } else {
             try {
                 System.out.println(pingChannel.getId() + "-" + role1.getId() + "-" + role2.getId());
-                FileWriter writer = new FileWriter("resources/settings");
+                FileWriter writer = new FileWriter("resources/settings.txt");
                 writer.write(pingChannel.getId() + "-" + role1.getId() + "-" + role2.getId());
                 writer.close();
             } catch (IOException e) {
@@ -175,7 +179,7 @@ public class ticketNotifier extends ListenerAdapter{
 
 
     private static void setupLoadSettings(ReadyEvent event) throws IOException, LoginException {
-        File settingsFile = new File("resources/settings");
+        File settingsFile = new File("resources/settings.txt");
         if (settingsFile.createNewFile()) {
             System.out.println("Settings file didn't exist, created new one");
         }
@@ -203,9 +207,9 @@ public class ticketNotifier extends ListenerAdapter{
 
     private void sendPing(MessageReceivedEvent event) {
         try {
-            FileWriter writer = new FileWriter("resources/openThreads", true);
+            FileWriter writer = new FileWriter("resources/openThreads.txt", true);
             writer.write(Long.toString(event.getThreadChannel().getIdLong()) + "\n");
-            System.out.println("New Thread ID written into openThreads File");
+            System.out.println("New Thread ID written into openThreads.txt File");
             if (role2 != null) {
                 pingChannel.sendMessage("New thread " + "<#" + event.getThreadChannel().getIdLong() + ">" + " detected " + role1.getAsMention() + role2.getAsMention()).queue();
             } else {

@@ -38,15 +38,15 @@ public class threadChecker implements Runnable {
     private void checkThread () throws IOException {
         System.out.println("Checking opened Threads...");
         boolean threadExists = false;
-        File openThreads = new File("resources/openThreads");
+        File openThreads = new File("resources/openThreads.txt");
         if (openThreads.createNewFile()) {
-            System.out.println("Creating new openThreads file");
+            System.out.println("Creating new openThreads.txt file");
         }
         Scanner reader = new Scanner(openThreads);
         List<ThreadChannel> guildThreadList = readyEvent.getJDA().getThreadChannels();
-        File tmpFile = new File("resources/openThreadsTMP");
+        File tmpFile = new File("resources/openThreadsTMP.txt");
         tmpFile.createNewFile();
-        FileWriter writer = new FileWriter("resources/openThreadsTMP");
+        FileWriter writer = new FileWriter("resources/openThreadsTMP.txt");
 
         for (int i = 0; i < guildThreadList.size(); i++) {
             while (reader.hasNextLine()) {
