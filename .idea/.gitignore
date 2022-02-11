@@ -7,6 +7,6 @@
 /dataSources/
 /dataSources.local.xml
 
-/src/main/resources/token
-/src/main/resources/settings
-/src/main/resources/openThreads
+resources/token
+resources/settings
+resources/openThreads
