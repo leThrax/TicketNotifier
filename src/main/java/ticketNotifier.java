@@ -12,6 +12,8 @@ import org.apache.commons.io.IOUtils;
 
 import javax.security.auth.login.LoginException;
 import java.io.*;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Scanner;
 
@@ -25,8 +27,9 @@ public class ticketNotifier extends ListenerAdapter{
     private static ReadyEvent readyEvent = null;
     static threadChecker threadChecker;
 
-    //public static void main(String[] args) throws LoginException, IOException {
     public static void start() throws LoginException, IOException {
+
+        //Reads in the token
         try {
             File tokenFile = new File("resources/token.txt");
             Scanner reader = new Scanner(tokenFile);
@@ -36,6 +39,7 @@ public class ticketNotifier extends ListenerAdapter{
             e.printStackTrace();
         }
 
+        //The bot object
         JDABuilder bot = JDABuilder.createDefault(token);
         bot.setActivity(Activity.watching("Searching for new threads..."));
         bot.addEventListeners(new ticketNotifier());
@@ -47,10 +51,12 @@ public class ticketNotifier extends ListenerAdapter{
                         .addOption(OptionType.ROLE, "role-1", "Add a Role that is going to be pinged.", true)
                         .addOption(OptionType.ROLE, "role-2", "Add another Role that is going to be pinged.", false));
         commands.queue();
-
     }
 
-
+    /**
+     * When the bot is ready it loads in the settings and runs a thread that constantly checks a server of Threads
+     * @param event Ready event
+     */
     @Override
     public void onReady (ReadyEvent event) {
         System.out.println("Bot is ready");
@@ -62,44 +68,51 @@ public class ticketNotifier extends ListenerAdapter{
             e.printStackTrace();
         }
         readyEvent = event;
-        //threadChecker = new threadChecker(readyEvent, null);
         Thread thread = new Thread(threadChecker = new threadChecker(readyEvent, null));
         thread.start();
-        //ticketNotifier thread = new ticketNotifier();
-        //thread.run();
     }
+
     /**
      * Logic of the Slash Command.
      * Will be automatically called when a Slash-Command is executed.
      *
-     * @param event
+     * @param event the Slash Command event
      */
     @Override
     public void onSlashCommandInteraction(SlashCommandInteractionEvent event) {
+        DateTimeFormatter dtf = DateTimeFormatter.ofPattern("uuuu/MM/dd HH:mm:ss");
+        LocalDateTime now = LocalDateTime.now();
+        //Event /setup
         if (event.getName().equals("setup")) {
             event.deferReply().queue();
             if (isAdmin(event)) {
+                //set local variables
                 pingChannel = event.getOption("channel").getAsTextChannel();
                 threadChecker.setPingChannel(pingChannel);
                 role1 = event.getOption("role-1").getAsRole();
+                //When 2 roles got selected
                 if (event.getOption("role-2") != null) {
                     role2 = event.getOption("role-2").getAsRole();
                 }
                 event.getHook().sendMessage("Finished setting up.").queue();
+                //When 2 roles got selected
                 if (role2 != null) {
                     event.getHook().sendMessage(role1.getName() + " and " + role2.getName()
                             + " will be now pinged in <#" + pingChannel.getId() + ">").queue();
+                //When 1 role got selected
                 } else {
                     event.getHook().sendMessage(role1.getName()
                             + " will be now pinged in <#" + pingChannel.getId() + ">").queue();
                 }
+                //Add settings to the file to make them persistent
                 try {
-                    System.out.println("Applying Settings to the File");
+                    System.out.println(dtf.format(now) +": Applying Settings to the File");
                     addSettingsToFile();
                 } catch (IOException e) {
                     e.printStackTrace();
                 }
             }
+            //Error message
             else {
                 event.getHook().sendMessage("Error. You need admin rights to use this command").queue();
             }
@@ -107,27 +120,35 @@ public class ticketNotifier extends ListenerAdapter{
     }
 
     /**
-     * Logic, when a Message Received
-     * Will be automatically called, when a Slash-Command is executed.
+     * Logic, when a Message got received
+     * Will be automatically called
      *
-     * @param event
+     * @param event Message received
      */
     @Override
     public void onMessageReceived(MessageReceivedEvent event) {
+        DateTimeFormatter dtf = DateTimeFormatter.ofPattern("uuuu/MM/dd HH:mm:ss");
+        LocalDateTime now = LocalDateTime.now();
         boolean threadExists = false;
+        //When the user is not a bot
         if (event.getMessage().getAuthor().getIdLong() != event.getJDA().getSelfUser().getIdLong()) {
+            //When the ping Channel is set
             if (pingChannel != null) {
+                //When the message is from a Discord thread
                 if (event.isFromThread()) {
                     File openThreads = new File("resources/openThreads.txt");
                     try {
+                        //If the file openThreads.txt does not exist, create a new one
                         if(openThreads.createNewFile()) {
-                            System.out.println("Created openThreads.txt File");
+                            System.out.println(dtf.format(now) +": Created openThreads.txt File");
                         }
                         if (openThreads.length() == 0) {
+                            //Sends the ping message that a thread was found and write thread id into openThreads.txt
                             sendPing(event);
                         } else {
                             try {
                                 Scanner reader = new Scanner(openThreads);
+                                //Checks if the thread id is already in the file
                                 while (reader.hasNextLine()) {
                                     long threadID = Long.parseLong(reader.nextLine());
                                     if (threadID == event.getThreadChannel().getIdLong()) {
@@ -137,6 +158,9 @@ public class ticketNotifier extends ListenerAdapter{
                                     }
                                 }
                                 reader.close();
+                                /*  If the thread does not exist in the list,
+                                * send a ping and write the id into openThreads.txt
+                                */
                                 if (!threadExists) {
                                     sendPing(event);
                                 }
@@ -149,13 +173,20 @@ public class ticketNotifier extends ListenerAdapter{
                     }
                 }
             } else {
-                System.out.println("Error, please execute /setup first and select a channel");
+                System.out.println(dtf.format(now) +": Error, please execute /setup first and select a channel");
             }
         }
     }
 
+    /**
+     * Adds the settings to a file to make them persistent
+     * @throws IOException exception
+     */
     private void addSettingsToFile() throws IOException {
-        System.out.println("Writing into settings.txt file...");
+        DateTimeFormatter dtf = DateTimeFormatter.ofPattern("uuuu/MM/dd HH:mm:ss");
+        LocalDateTime now = LocalDateTime.now();
+        System.out.println(dtf.format(now) +": Writing into settings.txt file...");
+        //For one selected role
         if (role2 == null) {
             try {
                 System.out.println(pingChannel.getId() + "-" + role1.getId());
@@ -165,6 +196,7 @@ public class ticketNotifier extends ListenerAdapter{
             } catch (IOException e) {
                 e.printStackTrace();
             }
+        //For two selected roles
         } else {
             try {
                 System.out.println(pingChannel.getId() + "-" + role1.getId() + "-" + role2.getId());
@@ -177,41 +209,60 @@ public class ticketNotifier extends ListenerAdapter{
         }
     }
 
-
+    /**
+     * Loads the setup settings and loads the roles and channel where those get pinged or creates new file
+     * @param event ready event
+     * @throws IOException exception
+     * @throws LoginException excpetion
+     */
     private static void setupLoadSettings(ReadyEvent event) throws IOException, LoginException {
+        DateTimeFormatter dtf = DateTimeFormatter.ofPattern("uuuu/MM/dd HH:mm:ss");
+        LocalDateTime now = LocalDateTime.now();
         File settingsFile = new File("resources/settings.txt");
+        //when the file doesn't exist
         if (settingsFile.createNewFile()) {
-            System.out.println("Settings file didn't exist, created new one");
+            System.out.println(dtf.format(now) +": Settings file didn't exist, created new one");
         }
         else {
-            System.out.println("Settings file exists");
+            System.out.println(dtf.format(now) +": Settings file exists");
         }
+        //When the file is not empty
         if (settingsFile.length() != 0) {
-            System.out.println("Settings file is not 0");
+            System.out.println(dtf.format(now) +": Settings file is not 0");
             Scanner reader = new Scanner(settingsFile);
             String[] setting = reader.nextLine().split("-");
+            //When 2 roles are stored
             if (setting.length == 3) {
                 pingChannel = event.getJDA().getTextChannelById(setting[0]);
                 threadChecker.setPingChannel(pingChannel);
                 role1 = event.getJDA().getRoleById(setting[1]);
                 role2 = event.getJDA().getRoleById(setting[2]);
-                System.out.println("Applied the Ping Channel and 2 Roles");
+                System.out.println(dtf.format(now) +": Applied the Ping Channel and 2 Roles");
+            //when 1 role is stored
             } else {
                 pingChannel = event.getJDA().getTextChannelById(setting[0]);
                 role1 = event.getJDA().getRoleById(setting[1]);
-                System.out.println("Applied the Ping Channel and the role");
+                System.out.println(dtf.format(now) +": Applied the Ping Channel and the role");
             }
             reader.close();
         }
     }
 
+    /**
+     * Sends a ping to the set channel when a new thread is created
+     * @param event message received event
+     */
     private void sendPing(MessageReceivedEvent event) {
+        DateTimeFormatter dtf = DateTimeFormatter.ofPattern("uuuu/MM/dd HH:mm:ss");
+        LocalDateTime now = LocalDateTime.now();
         try {
             FileWriter writer = new FileWriter("resources/openThreads.txt", true);
             writer.write(Long.toString(event.getThreadChannel().getIdLong()) + "\n");
-            System.out.println("New Thread ID written into openThreads.txt File");
+            System.out.println(dtf.format(now) +": New Thread ID written into openThreads.txt File");
+            //When 2 roles are set
             if (role2 != null) {
                 pingChannel.sendMessage("New thread " + "<#" + event.getThreadChannel().getIdLong() + ">" + " detected " + role1.getAsMention() + role2.getAsMention()).queue();
+            //When 1 role is set
             } else {
                 pingChannel.sendMessage("New thread " + "<#" + event.getThreadChannel().getIdLong() + ">" + " detected " + role1.getAsMention()).queue();
             }
@@ -221,15 +272,22 @@ public class ticketNotifier extends ListenerAdapter{
         }
     }
 
+    /**
+     * Checks if the user of the slash command has Discord Administrator privileges
+     * @param event slash command event
+     * @return boolean
+     */
     private boolean isAdmin(SlashCommandInteractionEvent event) {
+        DateTimeFormatter dtf = DateTimeFormatter.ofPattern("uuuu/MM/dd HH:mm:ss");
+        LocalDateTime now = LocalDateTime.now();
         List<Role> userRolesList = event.getInteraction().getMember().getRoles();
+        //Iterates through the roles list of the slash command user
         for (int i = 0; i < userRolesList.size(); i++) {
             if (userRolesList.get(i).getPermissions().contains(Permission.ADMINISTRATOR)) {
-                System.out.println("Slash Command User role has admin rights");
+                System.out.println(dtf.format(now) +": Slash Command User role has admin rights");
                 return true;
             }
         }
-
         return false;
     }
 }
