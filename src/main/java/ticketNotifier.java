@@ -50,6 +50,8 @@ public class ticketNotifier extends ListenerAdapter{
                         .addOption(OptionType.CHANNEL, "channel", "Add Channel where the Bot will ping the staff when a new Thread was created", true)
                         .addOption(OptionType.ROLE, "role-1", "Add a Role that is going to be pinged.", true)
                         .addOption(OptionType.ROLE, "role-2", "Add another Role that is going to be pinged.", false));
+        commands.addCommands(Commands.slash("clear", "Clears the amount of set messages in a channel.")
+                        .addOption(OptionType.INTEGER, "amount", "The amount of messages going to be deleted", true));
         commands.queue();
     }
 
@@ -113,6 +115,27 @@ public class ticketNotifier extends ListenerAdapter{
                 }
             }
             //Error message
+            else {
+                event.getHook().sendMessage("Error. You need admin rights to use this command").queue();
+            }
+        }
+        //Event /clear
+        if (event.getName().equals("clear")) {
+            event.deferReply().queue();
+            if (isAdmin(event)) {
+                int amount = Integer.valueOf(event.getOption("amount").getAsString());
+                if (amount == 0 || amount > 100 || amount < 0) {
+                    event.getHook().sendMessage("Please enter a valid integer between 1 and 100").queue();
+                }
+                else {
+                    MessageChannel commandChannel = event.getChannel();
+                    //Retrieves the messages of a set amount, then deletes them.
+                    commandChannel.getHistory().retrievePast(amount)
+                            .queue(messages -> { commandChannel.purgeMessages(messages); });
+
+                    event.getHook().sendMessage("Successfully cleared " + amount + " messages").queue();
+                }
+            }
             else {
                 event.getHook().sendMessage("Error. You need admin rights to use this command").queue();
             }
