@@ -85,7 +85,7 @@ public class ticketNotifier extends ListenerAdapter{
         readyEvent = event;
         Thread thread = new Thread(threadChecker = new threadChecker(readyEvent, null));
         thread.start();
-        logChannel = event.getJDA().getTextChannelById("940539800518291466");
+        logChannel = event.getJDA().getTextChannelById("591025614212038666");
     }
 
     /**
