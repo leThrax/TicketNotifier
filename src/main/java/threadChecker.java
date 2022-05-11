@@ -58,42 +58,27 @@ public class threadChecker implements Runnable {
             System.out.println(dtf.format(now) + ": Creating new openThreads.txt file");
         }
         Scanner reader = new Scanner(openThreads);
-        List<ThreadChannel> guildThreadList = new ArrayList<>(readyEvent.getJDA().getThreadChannels());
+        //List<ThreadChannel> guildThreadList = new ArrayList<>(readyEvent.getJDA().getThreadChannels());
         File tmpFile = new File("resources/openThreadsTMP.txt");
         tmpFile.createNewFile();
         FileWriter writer = new FileWriter("resources/openThreadsTMP.txt");
-        System.out.println(dtf.format(now) + ": Thread list: " + guildThreadList);
+        System.out.println(dtf.format(now) + ": Thread list: " + readyEvent.getJDA().getThreadChannels());
 
         //Checks if a thread in the list is archived, if yes, the thread is getting removed from the list.
-        for (int j = 0; j < guildThreadList.size(); j++) {
-            if (guildThreadList.get(j).isArchived()) {
-                System.out.println(dtf.format(now) + ": Removing archived thread: " + guildThreadList.get(j) + " ...");
-                guildThreadList.remove(guildThreadList.get(j));
-                System.out.println(dtf.format(now) + ": Thread list: " + guildThreadList);
-                j = 0;
-            }
-        }
-
-        //Gets a list of current thread ids from the server and check it with the ones in the text file
-        for (int i = 0; i < guildThreadList.size(); i++) {
-            while (reader.hasNextLine()) {
-                String fileID = reader.nextLine();
-                //System.out.println(dtf.format(now) + ": Current checked thread id against " +
-                        //guildThreadList.get(i).getId() + " is " + fileID);
-                if (guildThreadList.get(i).getId().equals(fileID)) {
-                    //System.out.println(dtf.format(now) + ": Id match!");
-                    threadExists = true;
-                    break;
+        for (int j = 0; j < readyEvent.getJDA().getThreadChannels().size(); j++) {
+            System.out.println(dtf.format(now) + ": Size of guildThreadList = " + readyEvent.getJDA().getThreadChannels().size());
+                while (reader.hasNextLine()) {
+                    String fileID = reader.nextLine();
+                    System.out.println(dtf.format(now) + ": Current checked thread id against " +
+                            readyEvent.getJDA().getThreadChannels().get(j).getId() + " is " + fileID);
+                    if (readyEvent.getJDA().getThreadChannels().get(j).getId().equals(fileID) && !readyEvent.getJDA().getThreadChannels().get(j).isArchived()) {
+                        //System.out.println(dtf.format(now) + ": Id match!");
+                        System.out.println(dtf.format(now) + ": Writing existing Thread into TMP file");
+                        writer.write(String.valueOf(readyEvent.getJDA().getThreadChannels().get(j).getId()) + "\n");
+                        break;
+                    }
                 }
-            }
-            if (threadExists) {
-                System.out.println(dtf.format(now) + ": Writing existing Thread into TMP file");
-                writer.write(String.valueOf(guildThreadList.get(i).getId()) + "\n");
-            }
-            else {
-                System.out.println(dtf.format(now) + " : Thread doesn't exist" );
-            }
-            reader.reset();
+                reader.reset();
         }
         writer.close();
         reader.close();

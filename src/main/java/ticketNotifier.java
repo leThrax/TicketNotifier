@@ -1,12 +1,16 @@
+import net.dv8tion.jda.api.JDA;
 import net.dv8tion.jda.api.JDABuilder;
 import net.dv8tion.jda.api.Permission;
 import net.dv8tion.jda.api.entities.*;
 import net.dv8tion.jda.api.events.ReadyEvent;
+import net.dv8tion.jda.api.events.guild.GuildJoinEvent;
+import net.dv8tion.jda.api.events.guild.member.GuildMemberJoinEvent;
 import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEvent;
 import net.dv8tion.jda.api.events.message.MessageReceivedEvent;
 import net.dv8tion.jda.api.hooks.ListenerAdapter;
 import net.dv8tion.jda.api.interactions.commands.OptionType;
 import net.dv8tion.jda.api.interactions.commands.build.Commands;
+import net.dv8tion.jda.api.requests.GatewayIntent;
 import net.dv8tion.jda.api.requests.restaction.CommandListUpdateAction;
 import org.apache.commons.io.IOUtils;
 
@@ -25,7 +29,11 @@ public class ticketNotifier extends ListenerAdapter{
     private static Role role2 = null;
     private static String token;
     private static ReadyEvent readyEvent = null;
+    private static boolean raidmode = false;
+    private static MessageChannel logChannel =  null;
     static threadChecker threadChecker;
+    DateTimeFormatter dtf = DateTimeFormatter.ofPattern("uuuu/MM/dd HH:mm:ss");
+    LocalDateTime now = LocalDateTime.now();
 
     public static void start() throws LoginException, IOException {
 
@@ -39,12 +47,14 @@ public class ticketNotifier extends ListenerAdapter{
             e.printStackTrace();
         }
 
+
         //The bot object
         JDABuilder bot = JDABuilder.createDefault(token);
         bot.setActivity(Activity.watching("Searching for new threads..."));
         bot.addEventListeners(new ticketNotifier());
+        bot.enableIntents(GatewayIntent.GUILD_MEMBERS);
 
-       //Add commands to the bot
+                //Add commands to the bot
         CommandListUpdateAction commands = bot.build().updateCommands()
                 .addCommands(Commands.slash("setup", "Setting up the channel where you want to get pinged and the roles to get pinged.")
                         .addOption(OptionType.CHANNEL, "channel", "Add Channel where the Bot will ping the staff when a new Thread was created", true)
@@ -52,7 +62,10 @@ public class ticketNotifier extends ListenerAdapter{
                         .addOption(OptionType.ROLE, "role-2", "Add another Role that is going to be pinged.", false));
         commands.addCommands(Commands.slash("clear", "Clears the amount of set messages in a channel.")
                         .addOption(OptionType.INTEGER, "amount", "The amount of messages going to be deleted", true));
+        commands.addCommands(Commands.slash("raid-mode", "Enable raidmode to prevent people joining the server")
+                        .addOption(OptionType.STRING, "true-false", "Type in true of false to enable or disable raidmode", true));
         commands.queue();
+
     }
 
     /**
@@ -72,6 +85,7 @@ public class ticketNotifier extends ListenerAdapter{
         readyEvent = event;
         Thread thread = new Thread(threadChecker = new threadChecker(readyEvent, null));
         thread.start();
+        logChannel = event.getJDA().getTextChannelById("940539800518291466");
     }
 
     /**
@@ -132,12 +146,57 @@ public class ticketNotifier extends ListenerAdapter{
                     //Retrieves the messages of a set amount, then deletes them.
                     commandChannel.getHistory().retrievePast(amount)
                             .queue(messages -> { commandChannel.purgeMessages(messages); });
+                    /*
+                   File deletedMessageLog = new File("resources/deletedMessages.txt");
+                    try {
+                        if(deletedMessageLog.createNewFile()) {
+                            System.out.println(dtf.format(now) +": Created deletedMessages.txt File");
+                        }
+
+                        FileWriter dMWriter = new FileWriter("resources/deletedMessages.txt", true);
+                        commandChannel.getHistory().retrievePast(amount).queue(messages -> {
+                            try {
+                                writeLog(amount, messages, dMWriter);
+                            } catch (IOException e) {
+                                e.printStackTrace();
+                            }
+                        });
+
+                        this.wait(100);
+                        logChannel.sendFile(deletedMessageLog).queue();
+                        deletedMessageLog.delete();
+
+                    } catch (IOException e) {
+
+                    } catch (InterruptedException e) {
+                        e.printStackTrace();
+                    } */
 
                     event.getHook().sendMessage("Successfully cleared " + amount + " messages").queue();
                 }
             }
             else {
                 event.getHook().sendMessage("Error. You need admin rights to use this command").queue();
+            }
+        }
+        //Event /raid-mode
+        if (event.getName().equals("raid-mode")) {
+            event.deferReply().queue();
+            if (isAdmin(event)) {
+                if (event.getOption("true-false").getAsString().equals("true") || event.getOption("true-false").getAsString().equals("false")) {
+                    raidmode = Boolean.parseBoolean(event.getOption("true-false").getAsString());
+                    if (raidmode == true) {
+                        event.getHook().sendMessage("Raidmode successfully activated").queue();
+                        logChannel.sendMessage("Raidmode successfully activated").queue();
+                    }
+                    else {
+                        event.getHook().sendMessage("Raidmode successfully deactivated").queue();
+                        logChannel.sendMessage("Raidmode successfully deactivated").queue();
+                    }
+                }
+                else {
+                    event.getHook().sendMessage("Please write true to activate raidmode or false to deactivate raidmode").queue();
+                }
             }
         }
     }
@@ -153,6 +212,7 @@ public class ticketNotifier extends ListenerAdapter{
         DateTimeFormatter dtf = DateTimeFormatter.ofPattern("uuuu/MM/dd HH:mm:ss");
         LocalDateTime now = LocalDateTime.now();
         boolean threadExists = false;
+
         //When the user is not a bot
         if (event.getMessage().getAuthor().getIdLong() != event.getJDA().getSelfUser().getIdLong()) {
             //When the ping Channel is set
@@ -201,13 +261,24 @@ public class ticketNotifier extends ListenerAdapter{
         }
     }
 
+    @Override
+    public void onGuildMemberJoin(GuildMemberJoinEvent event) {
+        System.out.println(dtf.format(now) +"New user joined the server: " + event.getUser());
+        if (raidmode == true) {
+            Guild server = event.getGuild();
+            server.kick(event.getMember()).queue();
+            event.getUser().openPrivateChannel().flatMap(channel -> channel.sendMessage("Automated bot message: " +
+                    event.getGuild().getName() + " has raidmode activated. Please join back later.")).queue();
+            logChannel.sendMessage("**RAIDMODE**: Kicked user " + event.getUser().getName()+ "("
+                    + event.getUser().getId() + ")" ).queue();
+        }
+    }
+
     /**
      * Adds the settings to a file to make them persistent
      * @throws IOException exception
      */
     private void addSettingsToFile() throws IOException {
-        DateTimeFormatter dtf = DateTimeFormatter.ofPattern("uuuu/MM/dd HH:mm:ss");
-        LocalDateTime now = LocalDateTime.now();
         System.out.println(dtf.format(now) +": Writing into settings.txt file...");
         //For one selected role
         if (role2 == null) {
@@ -306,13 +377,21 @@ public class ticketNotifier extends ListenerAdapter{
         List<Role> userRolesList = event.getInteraction().getMember().getRoles();
         //Iterates through the roles list of the slash command user
         for (int i = 0; i < userRolesList.size(); i++) {
-            if (userRolesList.get(i).getPermissions().contains(Permission.ADMINISTRATOR)) {
+            if (userRolesList.get(i).getPermissions().contains(Permission.ADMINISTRATOR) || userRolesList.get(i).getId().equals("470749380325146625")) {
                 System.out.println(dtf.format(now) +": Slash Command User role has admin rights");
                 return true;
             }
         }
         return false;
     }
+
+    private void writeLog(int amount, List<Message> messages, FileWriter dMWriter) throws IOException {
+        for (int i = 0;  i < amount; i++) {
+            dMWriter.append(messages.get(i).getContentRaw()+ "\n");
+        }
+        dMWriter.close();
+    }
+
 }
 
 
