@@ -16,6 +16,8 @@ import org.apache.commons.io.IOUtils;
 
 import javax.security.auth.login.LoginException;
 import java.io.*;
+import java.sql.Connection;
+import java.sql.SQLException;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
@@ -24,7 +26,7 @@ import java.util.Scanner;
 
 public class ticketNotifier extends ListenerAdapter{
 
-    private static MessageChannel pingChannel = null;
+    private static MessageChannel pingChannel;
     private static Role role1 = null;
     private static Role role2 = null;
     private static String token;
@@ -32,8 +34,10 @@ public class ticketNotifier extends ListenerAdapter{
     private static boolean raidmode = false;
     private static MessageChannel logChannel =  null;
     static threadChecker threadChecker;
-    DateTimeFormatter dtf = DateTimeFormatter.ofPattern("uuuu/MM/dd HH:mm:ss");
-    LocalDateTime now = LocalDateTime.now();
+    static SQLiteJDBC db = new SQLiteJDBC();
+    static Connection c = null;
+    DateTimeFormatter dtf;
+    LocalDateTime now;
 
     public static void start() throws LoginException, IOException {
 
@@ -50,7 +54,7 @@ public class ticketNotifier extends ListenerAdapter{
 
         //The bot object
         JDABuilder bot = JDABuilder.createDefault(token);
-        bot.setActivity(Activity.watching("Searching for new threads..."));
+        bot.setActivity(Activity.watching("for new threads..."));
         bot.addEventListeners(new ticketNotifier());
         bot.enableIntents(GatewayIntent.GUILD_MEMBERS);
 
@@ -74,7 +78,10 @@ public class ticketNotifier extends ListenerAdapter{
      */
     @Override
     public void onReady (ReadyEvent event) {
-        System.out.println("Bot is ready");
+        dtf = DateTimeFormatter.ofPattern("uuuu/MM/dd HH:mm:ss");
+        now = LocalDateTime.now();
+
+        System.out.println(dtf.format(now) +": Bot is ready");
         try {
             setupLoadSettings(event);
         } catch (IOException e) {
@@ -82,8 +89,16 @@ public class ticketNotifier extends ListenerAdapter{
         } catch (LoginException e) {
             e.printStackTrace();
         }
+        db.start();
+        c = db.getConnection();
+        try {
+            db.createTables(c);
+            loadThreadsToDB(event);
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
         readyEvent = event;
-        Thread thread = new Thread(threadChecker = new threadChecker(readyEvent, null));
+        Thread thread = new Thread(threadChecker = new threadChecker(readyEvent, null, db));
         thread.start();
         logChannel = event.getJDA().getTextChannelById("591025614212038666");
     }
@@ -96,8 +111,9 @@ public class ticketNotifier extends ListenerAdapter{
      */
     @Override
     public void onSlashCommandInteraction(SlashCommandInteractionEvent event) {
-        DateTimeFormatter dtf = DateTimeFormatter.ofPattern("uuuu/MM/dd HH:mm:ss");
-        LocalDateTime now = LocalDateTime.now();
+        dtf = DateTimeFormatter.ofPattern("uuuu/MM/dd HH:mm:ss");
+        now = LocalDateTime.now();
+
         //Event /setup
         if (event.getName().equals("setup")) {
             event.deferReply().queue();
@@ -209,9 +225,8 @@ public class ticketNotifier extends ListenerAdapter{
      */
     @Override
     public void onMessageReceived(MessageReceivedEvent event) {
-        DateTimeFormatter dtf = DateTimeFormatter.ofPattern("uuuu/MM/dd HH:mm:ss");
-        LocalDateTime now = LocalDateTime.now();
-        boolean threadExists = false;
+        dtf = DateTimeFormatter.ofPattern("uuuu/MM/dd HH:mm:ss");
+        now = LocalDateTime.now();
 
         //When the user is not a bot
         if (event.getMessage().getAuthor().getIdLong() != event.getJDA().getSelfUser().getIdLong()) {
@@ -219,51 +234,29 @@ public class ticketNotifier extends ListenerAdapter{
             if (pingChannel != null) {
                 //When the message is from a Discord thread
                 if (event.isFromThread()) {
-                    File openThreads = new File("resources/openThreads.txt");
+                    String threadID = event.getThreadChannel().getId();
+                    //Check inside the DB if the thread exists
                     try {
-                        //If the file openThreads.txt does not exist, create a new one
-                        if(openThreads.createNewFile()) {
-                            System.out.println(dtf.format(now) +": Created openThreads.txt File");
-                        }
-                        if (openThreads.length() == 0) {
-                            //Sends the ping message that a thread was found and write thread id into openThreads.txt
+                        //If the thread does not exist in the DB yet, send a notifaction ping and add the ID to the DB
+                        if (!db.checkOpenedThreads(c, threadID)) {
                             sendPing(event);
-                        } else {
-                            try {
-                                Scanner reader = new Scanner(openThreads);
-                                //Checks if the thread id is already in the file
-                                while (reader.hasNextLine()) {
-                                    long threadID = Long.parseLong(reader.nextLine());
-                                    if (threadID == event.getThreadChannel().getIdLong()) {
-                                        threadExists = true;
-                                        reader.close();
-                                        break;
-                                    }
-                                }
-                                reader.close();
-                                /*  If the thread does not exist in the list,
-                                * send a ping and write the id into openThreads.txt
-                                */
-                                if (!threadExists) {
-                                    sendPing(event);
-                                }
-                            } catch (FileNotFoundException e) {
-                                e.printStackTrace();
-                            }
+                            System.out.println(dtf.format(now) +": Thread " + threadID + " was not found, inserting into DB ...");
+                            db.insert(c, threadID);
                         }
-                    } catch (IOException e) {
+                    } catch (SQLException e) {
                         e.printStackTrace();
                     }
                 }
-            } else {
-                System.out.println(dtf.format(now) +": Error, please execute /setup first and select a channel");
             }
         }
     }
 
     @Override
     public void onGuildMemberJoin(GuildMemberJoinEvent event) {
-        System.out.println(dtf.format(now) +"New user joined the server: " + event.getUser());
+        dtf = DateTimeFormatter.ofPattern("uuuu/MM/dd HH:mm:ss");
+        now = LocalDateTime.now();
+
+        //System.out.println(dtf.format(now) +"New user joined the server: " + event.getUser());
         if (raidmode == true) {
             Guild server = event.getGuild();
             server.kick(event.getMember()).queue();
@@ -279,6 +272,9 @@ public class ticketNotifier extends ListenerAdapter{
      * @throws IOException exception
      */
     private void addSettingsToFile() throws IOException {
+        dtf = DateTimeFormatter.ofPattern("uuuu/MM/dd HH:mm:ss");
+        now = LocalDateTime.now();
+
         System.out.println(dtf.format(now) +": Writing into settings.txt file...");
         //For one selected role
         if (role2 == null) {
@@ -312,6 +308,7 @@ public class ticketNotifier extends ListenerAdapter{
     private static void setupLoadSettings(ReadyEvent event) throws IOException, LoginException {
         DateTimeFormatter dtf = DateTimeFormatter.ofPattern("uuuu/MM/dd HH:mm:ss");
         LocalDateTime now = LocalDateTime.now();
+
         File settingsFile = new File("resources/settings.txt");
         //when the file doesn't exist
         if (settingsFile.createNewFile()) {
@@ -347,22 +344,15 @@ public class ticketNotifier extends ListenerAdapter{
      * @param event message received event
      */
     private void sendPing(MessageReceivedEvent event) {
-        DateTimeFormatter dtf = DateTimeFormatter.ofPattern("uuuu/MM/dd HH:mm:ss");
-        LocalDateTime now = LocalDateTime.now();
-        try {
-            FileWriter writer = new FileWriter("resources/openThreads.txt", true);
-            writer.write(Long.toString(event.getThreadChannel().getIdLong()) + "\n");
-            System.out.println(dtf.format(now) +": New Thread ID written into openThreads.txt File");
-            //When 2 roles are set
-            if (role2 != null) {
-                pingChannel.sendMessage("New thread " + "<#" + event.getThreadChannel().getIdLong() + ">" + " detected " + role1.getAsMention() + role2.getAsMention()).queue();
+        dtf = DateTimeFormatter.ofPattern("uuuu/MM/dd HH:mm:ss");
+        now = LocalDateTime.now();
+
+        //When 2 roles are set
+        if (role2 != null) {
+            pingChannel.sendMessage("New thread " + "<#" + event.getThreadChannel().getIdLong() + ">" + " detected " + role1.getAsMention() + role2.getAsMention()).queue();
             //When 1 role is set
-            } else {
-                pingChannel.sendMessage("New thread " + "<#" + event.getThreadChannel().getIdLong() + ">" + " detected " + role1.getAsMention()).queue();
-            }
-            writer.close();
-        } catch (IOException e) {
-            e.printStackTrace();
+        } else {
+            pingChannel.sendMessage("New thread " + "<#" + event.getThreadChannel().getIdLong() + ">" + " detected " + role1.getAsMention()).queue();
         }
     }
 
@@ -372,8 +362,9 @@ public class ticketNotifier extends ListenerAdapter{
      * @return boolean
      */
     private boolean isAdmin(SlashCommandInteractionEvent event) {
-        DateTimeFormatter dtf = DateTimeFormatter.ofPattern("uuuu/MM/dd HH:mm:ss");
-        LocalDateTime now = LocalDateTime.now();
+        dtf = DateTimeFormatter.ofPattern("uuuu/MM/dd HH:mm:ss");
+        now = LocalDateTime.now();
+
         List<Role> userRolesList = event.getInteraction().getMember().getRoles();
         //Iterates through the roles list of the slash command user
         for (int i = 0; i < userRolesList.size(); i++) {
@@ -392,6 +383,16 @@ public class ticketNotifier extends ListenerAdapter{
         dMWriter.close();
     }
 
+    private void loadThreadsToDB (ReadyEvent event) throws SQLException {
+        for (int i = 0; i < event.getJDA().getThreadChannels().size(); i++) {
+            if(db.checkOpenedThreads(c, event.getJDA().getThreadChannels().get(i).getId())) {
+                db.insert(c, event.getJDA().getThreadChannels().get(i).getId());
+            }
+            System.out.println(dtf.format(now) +": Loaded already existing threads into DB");
+            db.printDB(c);
+
+        }
+    }
 }
 
 
